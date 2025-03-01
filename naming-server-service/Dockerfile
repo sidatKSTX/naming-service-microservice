@@ -7,7 +7,7 @@ RUN ls -al
 RUN mvn -f /naming-server/naming-server-service/pom.xml clean package -DskipTests
 
 # Stage 2: Create a lightweight runtime image
-FROM openjdk:17-alpine
+FROM amazoncorretto:21-alpine
 WORKDIR /naming-server
 COPY --from=build /naming-server/naming-server-service/target/*.jar app.jar
 
