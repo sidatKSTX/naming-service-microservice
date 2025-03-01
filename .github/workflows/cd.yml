@@ -34,7 +34,7 @@ jobs:
           sleep 45
 
   deploy:
-    runs-on: ci-runner
+    runs-on: cd-runner
     needs: start-ec2
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     steps:
