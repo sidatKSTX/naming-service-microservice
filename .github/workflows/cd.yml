@@ -1,5 +1,8 @@
 name: Continuous Deployment
 on:
+  push:
+    branches: feature/github-workflow
+      
   #workflow_run:
    # workflows: ["Continuous Integration"]
     #types:
