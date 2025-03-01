@@ -44,7 +44,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -52,12 +52,12 @@ jobs:
 
       - name: Build Docker Image for ECR
         run: |
-          docker build -t 818140567777.dkr.ecr.us-east-1.amazonaws.com/testrepo:new -f naming-server-service/Dockerfile .
+          docker build -t ${{ secrets.REGISTRY_LOGIN }}/testrepo:new -f naming-server-service/Dockerfile .
           docker images  
 
       - name: Push the Docker Image
         run: |
-          docker push 818140567777.dkr.ecr.us-east-1.amazonaws.com/testrepo:new
+          docker push ${{ secrets.REGISTRY_LOGIN }}/testrepo:new
 
   stop-ec2:
     runs-on: ubuntu-latest
