@@ -4,7 +4,7 @@ WORKDIR /naming-server
 COPY . .
 RUN pwd
 RUN ls -al
-RUN mvn clean package -DskipTests
+RUN mvn -f /naming-server/naming-server-service/pom.xml clean package -DskipTests
 
 # Stage 2: Create a lightweight runtime image
 FROM openjdk:17-alpine
