@@ -52,12 +52,12 @@ jobs:
 
       - name: Build Docker Image for ECR
         run: |
-          docker build -t ${{ secrets.REGISTRY_LOGIN }}/testrepo:new -f naming-server-service/Dockerfile .
+          docker build -t ${{ secrets.REGISTRY_LOGIN }}/testrepo:final -f naming-server-service/Dockerfile .
           docker images  
 
       - name: Push the Docker Image
         run: |
-          docker push ${{ secrets.REGISTRY_LOGIN }}/testrepo:new
+          docker push ${{ secrets.REGISTRY_LOGIN }}/testrepo:final
 
   stop-ec2:
     runs-on: ubuntu-latest
