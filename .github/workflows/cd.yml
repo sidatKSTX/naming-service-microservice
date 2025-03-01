@@ -67,6 +67,7 @@ jobs:
           echo "Stopping and removing old containers..."
           pwd
           ls -al
+          cd naming-server-service/
           sudo docker-compose down
           echo "Deploying new containers..."
           sudo docker-compose up -d
