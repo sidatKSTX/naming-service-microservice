@@ -1,7 +1,7 @@
 services:
 
   naming-server-service:
-    image: 818140567777.dkr.ecr.us-east-1.amazonaws.com/testrepo:final
+    image: 818140567777.dkr.ecr.us-east-1.amazonaws.com/testrepo:naming-server
     ports:
       - "8761:8761"
 
