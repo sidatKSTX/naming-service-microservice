@@ -9,7 +9,7 @@ RUN mvn -f /naming-server/naming-server-service/pom.xml clean package -DskipTest
 # Stage 2: Create a lightweight runtime image
 FROM amazoncorretto:21-alpine
 WORKDIR /naming-server
-COPY --from=build /naming-server/naming-server-service/target/*.jar app.jar
+COPY --from=build /naming-server/naming-server-service/target/*.jar naming-server-service.jar
 
 # Use a minimal command to run the application
-ENTRYPOINT ["java", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-jar", "naming-server-service.jar"]
