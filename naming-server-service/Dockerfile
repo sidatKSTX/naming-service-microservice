@@ -1,9 +1,9 @@
 # Stage 1: Build the application
 FROM maven:3.8.5-openjdk-17-slim AS build
 WORKDIR /naming-server
+COPY . .
 RUN pwd
 RUN ls -al
-COPY . .
 RUN mvn clean package -DskipTests
 
 # Stage 2: Create a lightweight runtime image
