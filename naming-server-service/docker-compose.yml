@@ -4,13 +4,7 @@ services:
     image: 818140567777.dkr.ecr.us-east-1.amazonaws.com/testrepo:final
     ports:
       - "8761:8761"
-    networks:
-      - naming_service_network
 
 volumes:
   postgres_data:
     driver: local
-
-networks:
-  namings_service_network:
-    driver: bridge
