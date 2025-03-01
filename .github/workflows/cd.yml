@@ -1,13 +1,9 @@
 name: Continuous Deployment
-on:
-  push:
-    branches: feature/github-workflow
-      
-  #workflow_run:
-   # workflows: ["Continuous Integration"]
-    #types:
-     # - completed
-  workflow_dispatch:
+on:      
+  workflow_run:
+    workflows: ["Continuous Integration"]
+    types:
+      - completed
 env:
   AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
   AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -63,10 +59,8 @@ jobs:
           sudo chmod +x /usr/local/bin/docker-compose
           docker-compose version
           echo "Logging into Amazon ECR..."
-          aws ecr get-login-password --region us-east-1 | sudo docker login --username AWS --password-stdin 940482440184.dkr.ecr.us-east-1.amazonaws.com
+          aws ecr get-login-password --region ${{ secrets.AWS_DEFAULT_REGION }} | sudo docker login --username AWS --password-stdin ${{ secrets.REGISTRY_LOGIN }}
           echo "Stopping and removing old containers..."
-          pwd
-          ls -al
           cd naming-server-service/
           sudo docker-compose down
           echo "Deploying new containers..."
