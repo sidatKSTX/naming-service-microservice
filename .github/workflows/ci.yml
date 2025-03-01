@@ -52,7 +52,7 @@ jobs:
 
       - name: Build Docker Image for ECR
         run: |
-          docker build -t 818140567777.dkr.ecr.us-east-1.amazonaws.com/testrepo:new .
+          docker build -t 818140567777.dkr.ecr.us-east-1.amazonaws.com/testrepo:new -f naming-server-service/Dockerfile .
           docker images  
 
       - name: Push the Docker Image
