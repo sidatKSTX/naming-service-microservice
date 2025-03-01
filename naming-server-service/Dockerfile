@@ -1,5 +1,5 @@
 # Stage 1: Build the application
-FROM maven:3.8.5-openjdk-17-slim AS build
+FROM maven:3.9.9-amazoncorretto-21-alpine AS build
 WORKDIR /naming-server
 COPY . .
 RUN pwd
