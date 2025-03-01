@@ -8,10 +8,6 @@ services:
       - "8761:8761"
     networks:
       - naming_service_network
-    environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://dev-aurora-postgresql-auroradbinstance-4xndvv5lf7k1.cmstfl08uvou.us-east-1.rds.amazonaws.com:3306/$POSTGRES_DB
-      SPRING_DATASOURCE_USERNAME: $POSTGRES_USER
-      SPRING_DATASOURCE_PASSWORD: $POSTGRES_PASSWORD
 
 volumes:
   postgres_data:
