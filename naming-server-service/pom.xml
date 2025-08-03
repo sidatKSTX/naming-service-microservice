@@ -14,8 +14,10 @@
 	<name>naming_server_service</name>
 	<description>Demo project for Spring Boot</description>
 	<properties>
-		<java.version>17</java.version>
+		<java.version>21</java.version>
 		<spring-cloud.version>2023.0.2</spring-cloud.version>
+		<sonar.organization>sidatkstx-1</sonar.organization>
+		<sonar.host.url>https://sonarcloud.io</sonar.host.url>
 	</properties>
 	<dependencies>
 		<dependency>

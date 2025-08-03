@@ -1,0 +1,307 @@
+name: SonarQube
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+env:
+  JAVA_VERSION: "21"
+  MAVEN_OPTS: "-Xmx1024m"
+  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
+  ECR_REPOSITORY: consultingfirm/naming-server-service
+  IMAGE_TAG: ${{ github.sha }}
+  SERVICE_DIRECTORY: "naming-server-service"
+  AWS_REGION: "us-east-1"
+
+jobs:
+  build:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'zulu'
+          
+      - name: Cache SonarQube packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+          
+      - name: Cache Maven packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+          
+      - name: Build and analyze
+        working-directory: ./${{ env.SERVICE_DIRECTORY }}
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=sidatKSTX/naming-service-microservice
+
+  build-and-scan:
+    name: Build Docker Image and Security Scan
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    
+    outputs:
+      image-uri: ${{ steps.build-image.outputs.image-uri }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'zulu'
+          
+      - name: Cache Maven packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+          
+      - name: Build application
+        working-directory: ./${{ env.SERVICE_DIRECTORY }}
+        run: mvn clean package -DskipTests
+        
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+        
+      - name: Build Docker image
+        id: build-image
+        working-directory: ./${{ env.SERVICE_DIRECTORY }}
+        run: |
+          IMAGE_URI="${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}"
+          docker build -t $IMAGE_URI .
+          echo "image-uri=$IMAGE_URI" >> $GITHUB_OUTPUT
+          
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@v0.17.0
+        with:
+          scan-type: 'fs'
+          scan-ref: './${{ env.SERVICE_DIRECTORY }}'
+          format: 'sarif'
+          output: 'trivy-fs-results.sarif'
+          
+      - name: Upload Trivy filesystem scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-fs-results.sarif'
+          
+      - name: Run Trivy image scan
+        uses: aquasecurity/trivy-action@v0.17.0
+        with:
+          image-ref: ${{ steps.build-image.outputs.image-uri }}
+          format: 'sarif'
+          output: 'trivy-image-results.sarif'
+          
+      - name: Upload Trivy image scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-image-results.sarif'
+          
+      - name: Run Trivy security gate
+        run: |
+          if [ -f "${{ env.SERVICE_DIRECTORY }}/.trivyignore" ]; then
+            echo "Using .trivyignore file for security gate"
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+              -v ${{ github.workspace }}/${{ env.SERVICE_DIRECTORY }}/.trivyignore:/tmp/.trivyignore \
+              aquasec/trivy:latest image \
+              --ignorefile /tmp/.trivyignore \
+              --exit-code 1 \
+              --severity HIGH,CRITICAL \
+              "${{ steps.build-image.outputs.image-uri }}"
+          else
+            echo "No .trivyignore file found, running without ignore file"
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+              aquasec/trivy:latest image \
+              --exit-code 1 \
+              --severity HIGH,CRITICAL \
+              "${{ steps.build-image.outputs.image-uri }}"
+          fi
+          
+      - name: Push image to Amazon ECR
+        run: |
+          docker push ${{ steps.build-image.outputs.image-uri }}
+
+  container-security-audit:
+    name: Container Security Audit
+    runs-on: ubuntu-latest
+    needs: build-and-scan
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+        
+      - name: Pull image from ECR
+        env:
+          IMAGE_URI: ${{ needs.build-and-scan.outputs.image-uri }}
+        run: |
+          docker pull "${{ env.IMAGE_URI }}"
+          
+      - name: Run comprehensive Trivy security scan
+        env:
+          IMAGE_URI: ${{ needs.build-and-scan.outputs.image-uri }}
+        run: |
+          if [ -f "${{ env.SERVICE_DIRECTORY }}/.trivyignore" ]; then
+            echo "Running comprehensive scan with .trivyignore file"
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+              -v ${{ github.workspace }}:/workspace \
+              -v ${{ github.workspace }}/${{ env.SERVICE_DIRECTORY }}/.trivyignore:/tmp/.trivyignore \
+              aquasec/trivy:latest image \
+              --ignorefile /tmp/.trivyignore \
+              --format json \
+              --output /workspace/trivy-comprehensive-results.json \
+              "${{ env.IMAGE_URI }}"
+          else
+            echo "Running comprehensive scan without .trivyignore file"
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+              -v ${{ github.workspace }}:/workspace \
+              aquasec/trivy:latest image \
+              --format json \
+              --output /workspace/trivy-comprehensive-results.json \
+              "${{ env.IMAGE_URI }}"
+          fi
+          
+      - name: Analyze vulnerability results
+        run: |
+          if [ -f "trivy-comprehensive-results.json" ]; then
+            echo "=== Container Security Audit Summary ==="
+            
+            # Count vulnerabilities by severity
+            CRITICAL=$(jq -r '.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL") | .VulnerabilityID' trivy-comprehensive-results.json | wc -l || echo "0")
+            HIGH=$(jq -r '.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH") | .VulnerabilityID' trivy-comprehensive-results.json | wc -l || echo "0")
+            MEDIUM=$(jq -r '.Results[]?.Vulnerabilities[]? | select(.Severity=="MEDIUM") | .VulnerabilityID' trivy-comprehensive-results.json | wc -l || echo "0")
+            LOW=$(jq -r '.Results[]?.Vulnerabilities[]? | select(.Severity=="LOW") | .VulnerabilityID' trivy-comprehensive-results.json | wc -l || echo "0")
+            
+            echo "Critical: $CRITICAL"
+            echo "High: $HIGH"  
+            echo "Medium: $MEDIUM"
+            echo "Low: $LOW"
+            
+            # Set thresholds
+            if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 10 ]; then
+              echo "❌ Security audit failed: Too many high-severity vulnerabilities"
+              echo "Threshold: CRITICAL=0, HIGH≤10"
+              exit 1
+            else
+              echo "✅ Security audit passed"
+            fi
+          else
+            echo "❌ Security audit results not found"
+            exit 1
+          fi
+          
+      - name: Generate security summary
+        if: always()
+        run: |
+          echo "## 🔒 Container Security Audit Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** \`${{ needs.build-and-scan.outputs.image-uri }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f "trivy-comprehensive-results.json" ]; then
+            CRITICAL=$(jq -r '.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL") | .VulnerabilityID' trivy-comprehensive-results.json | wc -l || echo "0")
+            HIGH=$(jq -r '.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH") | .VulnerabilityID' trivy-comprehensive-results.json | wc -l || echo "0")
+            MEDIUM=$(jq -r '.Results[]?.Vulnerabilities[]? | select(.Severity=="MEDIUM") | .VulnerabilityID' trivy-comprehensive-results.json | wc -l || echo "0")
+            LOW=$(jq -r '.Results[]?.Vulnerabilities[]? | select(.Severity=="LOW") | .VulnerabilityID' trivy-comprehensive-results.json | wc -l || echo "0")
+            
+            echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
+            echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Critical | $CRITICAL |" >> $GITHUB_STEP_SUMMARY
+            echo "| High | $HIGH |" >> $GITHUB_STEP_SUMMARY
+            echo "| Medium | $MEDIUM |" >> $GITHUB_STEP_SUMMARY
+            echo "| Low | $LOW |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Security scan results unavailable" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+      - name: Upload comprehensive security results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trivy-comprehensive-results
+          path: trivy-comprehensive-results.json
+          retention-days: 30
+
+  notification:
+    name: Pipeline Notification
+    runs-on: ubuntu-latest
+    needs: [build, build-and-scan, container-security-audit]
+    if: always()
+    
+    steps:
+      - name: Generate pipeline summary
+        run: |
+          echo "## 🚀 CI/CD Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Repository:** \`${{ github.repository }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Trigger:** \`${{ github.event_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Job Results" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Build and Test | ${{ needs.build.result == 'success' && '✅ Success' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build and Scan | ${{ needs.build-and-scan.result == 'success' && '✅ Success' || (needs.build-and-scan.result == 'skipped' && '⏭️ Skipped' || '❌ Failed') }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Security Audit | ${{ needs.container-security-audit.result == 'success' && '✅ Success' || (needs.container-security-audit.result == 'skipped' && '⏭️ Skipped' || '❌ Failed') }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Overall status
+          if [[ "${{ needs.build.result }}" == "success" ]]; then
+            if [[ "${{ github.ref }}" == "refs/heads/main" || "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+              if [[ "${{ needs.build-and-scan.result }}" == "success" && "${{ needs.container-security-audit.result }}" == "success" ]]; then
+                echo "### ✅ Pipeline Status: SUCCESS" >> $GITHUB_STEP_SUMMARY
+                echo "All jobs completed successfully!" >> $GITHUB_STEP_SUMMARY
+              else
+                echo "### ❌ Pipeline Status: FAILED" >> $GITHUB_STEP_SUMMARY
+                echo "One or more jobs failed. Please check the logs above." >> $GITHUB_STEP_SUMMARY
+              fi
+            else
+              echo "### ✅ Pipeline Status: SUCCESS" >> $GITHUB_STEP_SUMMARY
+              echo "Build and test completed successfully!" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "### ❌ Pipeline Status: FAILED" >> $GITHUB_STEP_SUMMARY
+            echo "Build and test failed. Please check the logs above." >> $GITHUB_STEP_SUMMARY
+          fi
