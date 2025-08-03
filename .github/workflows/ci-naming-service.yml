@@ -173,16 +173,17 @@ jobs:
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
         
-      - name: Pull image from ECR
-        env:
-          IMAGE_URI: ${{ needs.build-and-scan.outputs.image-uri }}
+      - name: Pull image from ECR  
         run: |
-          docker pull "${{ env.IMAGE_URI }}"
+          IMAGE_URI="${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}"
+          echo "Pulling image: $IMAGE_URI"
+          docker pull "$IMAGE_URI"
           
       - name: Run comprehensive Trivy security scan
-        env:
-          IMAGE_URI: ${{ needs.build-and-scan.outputs.image-uri }}
         run: |
+          IMAGE_URI="${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}"
+          echo "Scanning image: $IMAGE_URI"
+          
           if [ -f "${{ env.SERVICE_DIRECTORY }}/.trivyignore" ]; then
             echo "Running comprehensive scan with .trivyignore file"
             docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
@@ -192,7 +193,7 @@ jobs:
               --ignorefile /tmp/.trivyignore \
               --format json \
               --output /workspace/trivy-comprehensive-results.json \
-              "${{ env.IMAGE_URI }}"
+              "$IMAGE_URI"
           else
             echo "Running comprehensive scan without .trivyignore file"
             docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
@@ -200,7 +201,7 @@ jobs:
               aquasec/trivy:latest image \
               --format json \
               --output /workspace/trivy-comprehensive-results.json \
-              "${{ env.IMAGE_URI }}"
+              "$IMAGE_URI"
           fi
           
       - name: Analyze vulnerability results
@@ -235,9 +236,10 @@ jobs:
       - name: Generate security summary
         if: always()
         run: |
+          IMAGE_URI="${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}"
           echo "## 🔒 Container Security Audit Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Image:** \`${{ needs.build-and-scan.outputs.image-uri }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Image:** \`$IMAGE_URI\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
           if [ -f "trivy-comprehensive-results.json" ]; then
